@@ -930,14 +930,22 @@
   async function getOcrWorker(){
     if (ocrWorker) return ocrWorker;
     if (ocrWorkerPromise) return ocrWorkerPromise;
+    // Tesseract.js 4.x (this CDN build): createWorker() returns an UNINITIALIZED
+    // worker — we must load()/loadLanguage()/initialize() before setParameters()
+    // and recognize(). Passing a language into createWorker() triggers an
+    // auto-init path that fails here ("Cannot read properties of null"), which is
+    // what previously broke OCR entirely.
     ocrWorkerPromise = (async () => {
-      const worker = await Tesseract.createWorker("eng", 1, {
+      const worker = await Tesseract.createWorker({
         logger: m => {
-          if (ocrLoggerActive && m.status === "recognizing text"){
+          if (ocrLoggerActive && m && m.status === "recognizing text"){
             ocrStatus.textContent = `文字認識中… ${Math.round((m.progress||0)*100)}%`;
           }
         }
       });
+      if (typeof worker.load === "function") await worker.load();
+      if (typeof worker.loadLanguage === "function") await worker.loadLanguage("eng");
+      if (typeof worker.initialize === "function") await worker.initialize("eng");
       await worker.setParameters({
         tessedit_char_whitelist: OCR_WHITELIST,
         tessedit_pageseg_mode: (Tesseract.PSM && Tesseract.PSM.SINGLE_BLOCK) || "6",
@@ -945,7 +953,7 @@
       });
       ocrWorker = worker;
       return worker;
-    })();
+    })().catch(err => { ocrWorkerPromise = null; throw err; }); // allow retry on failure
     return ocrWorkerPromise;
   }
 
