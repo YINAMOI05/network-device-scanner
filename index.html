@@ -1,0 +1,1052 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ネットワーク機器 台帳スキャナ</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html5-qrcode/2.3.8/html5-qrcode.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/tesseract.js/4.1.1/tesseract.min.js"></script>
+<style>
+  :root{
+    --bg: #10151b;
+    --panel: #161d25;
+    --panel-line: #26313d;
+    --ink: #e7ecf1;
+    --ink-dim: #8a99a8;
+    --cyan: #52d7c9;
+    --amber: #f0a559;
+    --red: #e2665f;
+    --mono: 'IBM Plex Mono', monospace;
+    --sans: 'Inter', system-ui, sans-serif;
+  }
+  *{box-sizing:border-box;}
+  body{margin:0; background:var(--bg); color:var(--ink); font-family:var(--sans); -webkit-tap-highlight-color:transparent;}
+  .wrap{max-width:960px; margin:0 auto; padding:20px 16px 60px;}
+
+  header{padding:8px 0 20px; border-bottom:1px solid var(--panel-line); margin-bottom:22px;}
+  .eyebrow{font-family:var(--mono); font-size:11px; letter-spacing:.14em; color:var(--cyan); text-transform:uppercase;}
+  h1{font-size:21px; margin:6px 0 4px; font-weight:700; letter-spacing:-.01em;}
+  .sub{color:var(--ink-dim); font-size:13.5px; line-height:1.5;}
+
+  .grid{display:grid; grid-template-columns:1fr; gap:18px;}
+  @media(min-width:800px){ .grid{grid-template-columns: 340px 1fr;} }
+
+  .panel{background:var(--panel); border:1px solid var(--panel-line); border-radius:10px; padding:16px;}
+  .panel + .panel{margin-top:18px;}
+  .panel h2{font-size:12.5px; text-transform:uppercase; letter-spacing:.08em; color:var(--ink-dim); margin:0 0 12px; font-weight:600;}
+
+  /* viewfinder */
+  .scan-area{position:relative; border-radius:8px; overflow:hidden; background:#000; aspect-ratio:1/1; max-width:340px; margin:0 auto;}
+  .scan-area.inactive{display:flex; align-items:center; justify-content:center; aspect-ratio:auto; min-height:200px;}
+  #reader{width:100%; height:100%;}
+  #reader video{width:100% !important; height:100% !important; object-fit:cover;}
+  .brackets{position:absolute; inset:0; pointer-events:none;}
+  .brackets span{position:absolute; width:24px; height:24px; border:2px solid var(--cyan);}
+  .brackets .tl{top:14%; left:14%; border-right:none; border-bottom:none;}
+  .brackets .tr{top:14%; right:14%; border-left:none; border-bottom:none;}
+  .brackets .bl{bottom:14%; left:14%; border-right:none; border-top:none;}
+  .brackets .br{bottom:14%; right:14%; border-left:none; border-top:none;}
+  .scanline{position:absolute; left:14%; right:14%; top:14%; height:2px; background:var(--cyan); box-shadow:0 0 8px var(--cyan); animation:sweep 2.1s ease-in-out infinite;}
+  @keyframes sweep{0%{top:14%;opacity:.9} 50%{top:82%;opacity:.4} 100%{top:14%;opacity:.9}}
+  @media (prefers-reduced-motion: reduce){ .scanline{animation:none;} }
+  .placeholder{color:var(--ink-dim); font-family:var(--mono); font-size:12px; text-align:center; padding:0 16px;}
+
+  .controls{display:flex; gap:10px; margin-top:14px; flex-wrap:wrap; justify-content:center;}
+  button{font-family:var(--sans); font-weight:600; font-size:13.5px; border-radius:7px; border:1px solid var(--panel-line); background:#1c252e; color:var(--ink); padding:9px 14px; cursor:pointer; transition:border-color .15s, background .15s;}
+  button:hover{border-color:var(--cyan);}
+  button.primary{background:var(--cyan); color:#0b1116; border-color:var(--cyan);}
+  button.primary:hover{background:#68e2d5;}
+  button.ghost{background:transparent;}
+  button.danger{color:var(--red); border-color:#3a2422;}
+  button:disabled{opacity:.4; cursor:not-allowed;}
+  button.small{padding:5px 9px; font-size:12px;}
+
+  .manual-row{display:flex; gap:8px; margin-top:6px;}
+  .manual-row input{flex:1; background:#0e1319; border:1px solid var(--panel-line); border-radius:7px; color:var(--ink); padding:9px 11px; font-family:var(--mono); font-size:12.5px;}
+  .manual-row input:focus{outline:none; border-color:var(--cyan);}
+  .status-line{font-family:var(--mono); font-size:11.5px; color:var(--ink-dim); margin-top:10px; min-height:16px; text-align:center;}
+
+  /* staging form */
+  .field{margin-bottom:12px;}
+  .field label{display:block; font-family:var(--mono); font-size:10.5px; letter-spacing:.05em; text-transform:uppercase; color:var(--ink-dim); margin-bottom:5px;}
+  .field input, .field select{width:100%; background:#0e1319; border:1px solid var(--panel-line); border-radius:7px; color:var(--ink); padding:9px 11px; font-family:var(--mono); font-size:12.5px;}
+  .field input::placeholder{font-family:var(--sans); color:#54636f;}
+  .field select{font-family:var(--sans);}
+  .field input:focus, .field select:focus{outline:none; border-color:var(--cyan);}
+  .chips{display:flex; flex-wrap:wrap; gap:6px; margin-top:6px;}
+  .chip{display:flex; align-items:center; gap:6px; background:#0e1319; border:1px solid var(--panel-line); border-radius:14px; padding:4px 9px; font-family:var(--mono); font-size:11px;}
+  .chip button{background:none; border:none; color:var(--ink-dim); padding:0; font-size:13px; line-height:1;}
+  .chip button:hover{color:var(--red);}
+  .vendor-hint{font-family:var(--mono); font-size:11px; color:var(--cyan); margin-top:5px; min-height:14px;}
+  .two-col{display:grid; grid-template-columns:1fr 1fr; gap:10px;}
+  .stage-actions{display:flex; gap:10px; margin-top:14px;}
+
+  table{width:100%; border-collapse:collapse; font-size:12.8px;}
+  thead th{text-align:left; font-family:var(--mono); font-size:10px; letter-spacing:.06em; text-transform:uppercase; color:var(--ink-dim); border-bottom:1px solid var(--panel-line); padding:8px 7px;}
+  tbody td{padding:9px 7px; border-bottom:1px solid #1c242c; vertical-align:top;}
+  tbody tr:hover{background:#131a21;}
+  .code-cell{font-family:var(--mono); font-size:12px; word-break:break-all;}
+  .vendor{font-size:12px;}
+  .vendor.unknown{color:var(--ink-dim); font-style:italic;}
+  .note-input{width:100%; background:transparent; border:1px solid transparent; border-radius:5px; color:var(--ink); font-family:var(--sans); font-size:12px; padding:5px 6px;}
+  .note-input:hover, .note-input:focus{border-color:var(--panel-line); background:#0e1319; outline:none;}
+  .del-btn{background:none; border:none; color:var(--ink-dim); font-size:16px; padding:2px 6px; cursor:pointer;}
+  .del-btn:hover{color:var(--red);}
+  .empty-row td{text-align:center; color:var(--ink-dim); font-family:var(--mono); font-size:12px; padding:24px 0;}
+  .cam-enhance-row{display:flex; align-items:center; gap:8px; margin-bottom:8px; font-family:var(--mono); font-size:11px; color:var(--ink-dim);}
+  .cam-enhance-row input[type="range"]{flex:1; accent-color:var(--cyan);}
+  .cam-enhance-note{font-family:var(--mono); font-size:11px; color:var(--ink-dim); line-height:1.5;}
+  .export-row{display:flex; gap:10px; justify-content:flex-end; margin-top:14px; flex-wrap:wrap;}
+  .count-badge{font-family:var(--mono); font-size:11px; color:var(--ink-dim);}
+  footer{margin-top:26px; font-size:11.5px; color:var(--ink-dim); line-height:1.6; border-top:1px solid var(--panel-line); padding-top:14px;}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <div class="eyebrow">Asset ID / 02</div>
+    <h1>ネットワーク機器 台帳スキャナ</h1>
+    <div class="sub">シリアル・製造番号(型番)のバーコードと本体のMACを読み取り、自動で振り分けながら1台の機器として記録します。最後にCSV/JSONで書き出せます。</div>
+  </header>
+
+  <div class="grid">
+    <div>
+      <div class="panel">
+        <h2>スキャン</h2>
+        <div class="scan-area inactive" id="scanArea">
+          <div class="placeholder" id="placeholderText">「カメラを開始」を押してください<br>読み取るたびに右の入力欄が自動で埋まります</div>
+        </div>
+        <div class="controls">
+          <button class="primary" id="startBtn">カメラを開始</button>
+          <button id="switchBtn" disabled>カメラ切替</button>
+          <button id="stopBtn" disabled>停止</button>
+        </div>
+        <div id="cameraEnhancements" style="display:none; margin-top:10px;"></div>
+        <div class="manual-row">
+          <input type="text" id="manualInput" placeholder="読み取れない場合は直接入力">
+          <button id="manualAddBtn">追加</button>
+        </div>
+        <div class="status-line" id="statusLine"></div>
+        <div class="status-line" id="scanDebug" style="opacity:0.7;"></div>
+
+        <div style="margin-top:16px; padding-top:14px; border-top:1px solid var(--panel-line);">
+          <label style="display:block; font-family:var(--mono); font-size:10.5px; letter-spacing:.05em; text-transform:uppercase; color:var(--ink-dim); margin-bottom:8px;">バーコードが読めない場合: 文字認識(OCR)</label>
+          <label style="display:flex; align-items:center; gap:8px; font-size:12.5px; margin-bottom:10px; cursor:pointer;">
+            <input type="checkbox" id="autoOcrToggle" style="width:16px; height:16px;">
+            カメラ映像から自動で文字認識する（写真を撮る操作なしで流れ作業）
+          </label>
+          <input type="file" accept="image/*" capture="environment" id="ocrFileInput" style="display:none;">
+          <canvas id="ocrCanvas" style="display:none;"></canvas>
+          <button id="ocrTriggerBtn" style="width:100%;">代わりに1枚だけ撮って文字認識</button>
+          <div class="status-line" id="ocrStatus"></div>
+          <div id="ocrResultBox" style="display:none; margin-top:10px;">
+            <div class="field">
+              <label>認識結果（編集可）</label>
+              <input type="text" id="ocrText" placeholder="">
+            </div>
+            <div class="chips" id="ocrCandidates"></div>
+            <div style="display:flex; gap:8px; margin-top:8px; flex-wrap:wrap;">
+              <button class="small" id="ocrUseAsSerialBtn">シリアル欄に入れる</button>
+              <button class="small" id="ocrUseAsPidBtn">製造番号欄に入れる</button>
+              <button class="small" id="ocrUseAsNoteBtn">メモに入れる</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div>
+      <div class="panel">
+        <h2>現在スキャン中の機器</h2>
+
+        <div class="field">
+          <label>シリアルナンバー (S/N)</label>
+          <input type="text" id="serialInput" placeholder="バーコードを読むと自動入力">
+          <div class="chips" id="extraSerialChips"></div>
+        </div>
+
+        <div class="field">
+          <label>製造番号 / 型番 (PID)</label>
+          <input type="text" id="pidInput" placeholder="例: AIR-CT2504-K9">
+          <div class="chips" id="extraPidChips"></div>
+        </div>
+
+        <div class="field">
+          <label>MACアドレス（本体）</label>
+          <input type="text" id="macInput" placeholder="aa:bb:cc:11:22:33">
+          <div class="vendor-hint" id="vendorHint"></div>
+          <div class="chips" id="extraMacChips"></div>
+        </div>
+
+        <div class="two-col">
+          <div class="field">
+            <label>推定種別</label>
+            <select id="kindSelect">
+              <option value="">未設定</option>
+              <option value="ルーター">ルーター</option>
+              <option value="スイッチ">スイッチ</option>
+              <option value="無線AP">無線AP</option>
+              <option value="サーバー/PC">サーバー/PC</option>
+              <option value="プリンター">プリンター</option>
+              <option value="IoT/組込み機器">IoT/組込み機器</option>
+              <option value="監視カメラ">監視カメラ</option>
+              <option value="その他">その他</option>
+            </select>
+          </div>
+          <div class="field">
+            <label>設置場所</label>
+            <input type="text" id="locationInput" placeholder="例: 3F サーバー室">
+          </div>
+        </div>
+
+        <div class="field">
+          <label>メモ</label>
+          <input type="text" id="noteInput" placeholder="任意">
+        </div>
+
+        <div class="stage-actions">
+          <button class="primary" id="commitBtn">この機器を台帳に追加</button>
+          <button class="ghost" id="stageClearBtn">入力欄をクリア</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="panel" style="margin-top:18px;">
+    <h2>機器台帳 <span class="count-badge" id="countBadge">(0件)</span></h2>
+    <div style="overflow-x:auto;">
+      <table>
+        <thead>
+          <tr>
+            <th style="width:64px;">追加時刻</th>
+            <th>シリアル (S/N)</th>
+            <th>製造番号/型番</th>
+            <th>MAC</th>
+            <th style="width:150px;">ベンダー</th>
+            <th style="width:100px;">種別</th>
+            <th style="width:110px;">設置場所</th>
+            <th>メモ</th>
+            <th style="width:28px;"></th>
+          </tr>
+        </thead>
+        <tbody id="logBody">
+          <tr class="empty-row"><td colspan="9">まだ機器が登録されていません</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="export-row">
+      <button id="clearBtn" class="danger">台帳を消去</button>
+      <button id="exportCsvBtn">CSVで出力</button>
+      <button id="exportJsonBtn">JSONで出力</button>
+    </div>
+  </div>
+
+  <footer>
+    ・<strong>自動振り分け</strong>：スキャンした値は次のルールで判定されます。①16進数12桁（区切りあり/なし、Ciscoのドット区切り含む）は「MAC」欄。②ハイフンを含む文字列（例: AIR-CT2504-K9、74-7363-02）は「製造番号/型番」欄。③それ以外の英数字（例: PSJ153501UJ）は「シリアル(S/N)」欄。各欄が既に埋まっている場合は追加欄にチップとして積まれます（同じ機器に複数のMAC/型番/シリアルがある場合向け）。<br>
+    ・MACからのベンダー判定は、まず内蔵の簡易OUI表で行い、オンラインならmacvendors.comにも照会します（オフラインでは内蔵表の結果のみ）。ベンダーから機器種別を推測し「推定種別」に仮入力しますが、必要に応じて選び直せます。<br>
+    ・「この機器を台帳に追加」を押すと1行として記録され、入力欄はクリアされて次の機器のスキャンに移れます。データはこのページを開いている間だけ保持され、保存はしません。作業が終わったらCSV/JSONで書き出してください。<br>
+    ・<strong>iPhoneで使う場合</strong>：SafariでこのページをHTTPS経由で開いてください。iOSはセキュリティ上、`file://`で直接開いたファイルではカメラを起動できません。このHTMLファイルを <a href="https://app.netlify.com/drop" target="_blank" rel="noopener" style="color:var(--cyan);">Netlify Drop</a>（ファイルをドラッグ&ドロップするだけでHTTPSのURLが発行される無料サービス）やGitHub Pagesなどにアップロードし、発行されたURLをiPhoneのSafariで開いてください。「ホーム画面に追加」した状態は挙動が不安定になることがあるため、通常のSafariタブで使うのがおすすめです。<br>
+    ・複数カメラがある端末（iPhone含む）では「カメラ切替」ボタンで前面/背面を切り替えられます。背面カメラを自動選択しますが、意図したカメラでない場合はこのボタンで切り替えてください。<br>
+    ・<strong>流れ作業モード</strong>：バーコード/MACをスキャン、または自動文字認識で候補を検出すると、約2.2秒操作がなければ自動的に「台帳に追加」され、次の機器の入力欄に切り替わります。途中で別のコードを読めばタイマーはリセットされ、そのまま同じ機器の情報として積み重なります。すぐに確定したい/取り消したい場合は「この機器を台帳に追加」「入力欄をクリア」を使ってください。<br>
+    ・<strong>バーコードが読み取れない場合</strong>：「カメラ映像から自動で文字認識する」にチェックを入れると、写真を撮る操作なしで映像から数秒おきに文字を読み取ります。ラベルに「S/N:」「PID:」「P/N:」といった印字があれば、その文脈を優先してシリアル/製造番号欄に振り分けます。それ以外はMAC形式や上記のハイフン判定ルールで自動振り分けします。個別に1枚だけ撮って確認したい場合は「代わりに1枚だけ撮って文字認識」ボタンも使えます。<br>
+    ・<strong>ピントが合わない場合</strong>：<strong>画面をタップ</strong>すると、その場でカメラを再起動してピントを合わせ直します（対応端末では連続オートフォーカスを自動で有効化し、ズーム・ライトも使えます）。iPhoneのSafariはブラウザからピントを直接操作する機能自体がないため、このタップ操作（カメラの再起動でOS側のオートフォーカスを再度走らせる）が実質的な対処法になります。加えて、背面レンズが複数ある端末では標準の広角レンズ（超広角/望遠より近距離のピントが合いやすい）を自動選択しています。<br>
+    ・<strong>バーコードが認識されない場合</strong>：スキャン枠を1次元バーコード向けの横長にし、対応フォーマット(Code128/39/93・EAN・UPC・ITFなど)を明示し、カメラ解像度も上げるようにしています。それでも読めない場合は、①バーコードとの距離を10〜15cmほどに離す（近すぎるとピントが合わない）、②バーコード全体が枠内に収まるよう傾けずまっすぐ向ける、③反射や影を避けて明るい場所で試す、④画面をタップしてピントを合わせ直す、といった点を試してください。それでも難しい場合は自動文字認識(OCR)や手動入力をお使いください。<br>
+    ・OCRは印刷された英数字のラベルが最も精度が高く、手書き文字やかすれ・反射のある写真は誤読が増えます。自動反映された内容は台帳の該当行やスキャン欄で必ず確認し、間違っていれば行を削除するかメモ欄を修正してください。
+  </footer>
+
+</div>
+
+<script>
+(function(){
+  // ---------- offline OUI table (curated subset) + naive device-kind hints ----------
+  const OUI_DB = {
+    "00:1A:2B":"Cisco Systems", "00:16:76":"Cisco Systems", "00:1A:A1":"Cisco Systems", "00:23:04":"Cisco Systems",
+    "00:0C:29":"VMware (virtual)", "00:50:56":"VMware (virtual)",
+    "00:1B:63":"Apple", "00:1E:C2":"Apple", "3C:15:C2":"Apple", "A4:83:E7":"Apple", "F0:18:98":"Apple", "AC:BC:32":"Apple", "D8:96:95":"Apple", "B0:34:95":"Apple", "A8:66:7F":"Apple", "00:1C:B3":"Apple",
+    "00:16:6F":"Samsung", "5C:0A:5B":"Samsung", "8C:71:F8":"Samsung", "E8:50:8B":"Samsung",
+    "F4:F5:D8":"Google", "3C:5A:B4":"Google", "94:EB:2C":"Google",
+    "B8:27:EB":"Raspberry Pi Foundation", "DC:A6:32":"Raspberry Pi Foundation", "E4:5F:01":"Raspberry Pi Foundation",
+    "24:0A:C4":"Espressif (ESP32/ESP8266)", "A4:CF:12":"Espressif (ESP32/ESP8266)", "8C:AA:B5":"Espressif (ESP32/ESP8266)", "EC:FA:BC":"Espressif (ESP32/ESP8266)",
+    "00:1D:D8":"Microsoft", "00:15:5D":"Microsoft (Hyper-V)", "28:18:78":"Microsoft",
+    "00:16:32":"Dell", "14:FE:B5":"Dell", "F8:B1:56":"Dell",
+    "3C:D9:2B":"HP / HPE", "00:1F:29":"HP / HPE",
+    "00:21:5A":"Lenovo", "6C:29:90":"Lenovo",
+    "00:0F:B5":"Netgear", "A0:04:60":"Netgear", "20:4E:7F":"Netgear",
+    "00:14:BF":"D-Link", "1C:BD:B9":"D-Link",
+    "F4:F2:6D":"TP-Link", "50:C7:BF":"TP-Link", "AC:84:C6":"TP-Link", "98:DA:C4":"TP-Link",
+    "24:A4:3C":"Ubiquiti Networks", "78:8A:20":"Ubiquiti Networks", "DC:9F:DB":"Ubiquiti Networks",
+    "00:26:B0":"Buffalo (Melco)", "00:1D:73":"Buffalo (Melco)",
+    "00:24:E4":"NEC", "00:0B:97":"NEC",
+    "00:0D:0B":"Ricoh", "00:26:73":"Canon", "00:1B:A9":"Canon",
+    "00:1D:0F":"Brother", "30:05:5C":"Brother",
+    "00:26:5A":"Sony", "AC:9B:0A":"Sony",
+    "00:23:6C":"Nintendo", "58:BD:A3":"Nintendo",
+    "F0:27:2D":"Amazon (Echo/Fire)", "44:65:0D":"Amazon (Echo/Fire)", "68:37:E9":"Amazon (Echo/Fire)",
+    "10:BF:48":"Xiaomi", "F0:B4:29":"Xiaomi", "78:11:DC":"Xiaomi",
+    "00:1E:65":"Huawei", "00:E0:FC":"Huawei", "48:46:FB":"Huawei",
+    "00:26:E8":"Motorola", "00:1A:1B":"Motorola",
+    "F8:04:2E":"Sonos", "5C:AA:FD":"Sonos",
+    "00:17:88":"Philips Hue (Signify)",
+    "3C:71:BF":"Fitbit",
+    "00:04:F2":"Polycom",
+    "00:22:41":"Intel", "00:1B:21":"Intel", "34:02:86":"Intel",
+    "00:0A:E4":"AboCom (various OEM Wi-Fi)"
+  };
+
+  const KIND_HINTS = [
+    { re: /cisco|netgear|tp-link|d-link|buffalo|nec\b|abocom/i, kind: "スイッチ" },
+    { re: /ubiquiti/i, kind: "無線AP" },
+    { re: /ricoh|canon|brother/i, kind: "プリンター" },
+    { re: /dell|hp \/|hpe|lenovo|intel|microsoft \(hyper|vmware/i, kind: "サーバー/PC" },
+    { re: /raspberry pi|espressif/i, kind: "IoT/組込み機器" },
+    { re: /sony|sonos|philips hue/i, kind: "その他" },
+    { re: /apple|samsung|google|xiaomi|huawei|motorola/i, kind: "その他" }
+  ];
+
+  function macVendorOffline(mac){
+    const prefix = mac.toUpperCase().replace(/-/g,":").slice(0,8);
+    return OUI_DB[prefix] || null;
+  }
+  function guessKindFromVendor(vendor){
+    if (!vendor) return "";
+    for (const h of KIND_HINTS){ if (h.re.test(vendor)) return h.kind; }
+    return "";
+  }
+
+  // MAC can arrive as aa:bb:cc:11:22:33, aa-bb-cc-11-22-33, Cisco dotted aabb.ccdd.eeff,
+  // or as a bare 12-hex-digit string with no separators (common on equipment barcodes).
+  function extractMacCandidate(raw){
+    const t = raw.trim();
+    let hex = null;
+    if (/^([0-9A-Fa-f]{2}[:\-]){5}[0-9A-Fa-f]{2}$/.test(t)) hex = t.replace(/[:\-]/g, "");
+    else if (/^([0-9A-Fa-f]{4}\.){2}[0-9A-Fa-f]{4}$/.test(t)) hex = t.replace(/\./g, "");
+    else if (/^[0-9A-Fa-f]{12}$/.test(t)) hex = t;
+    if (!hex) return null;
+    return hex.toUpperCase().match(/.{2}/g).join(":");
+  }
+  function isMac(s){ return extractMacCandidate(s) !== null; }
+
+  // Classification for anything that isn't a MAC: codes containing a hyphen are treated as
+  // a product/model number (PID) — e.g. AIR-CT2504-K9, 74-7363-02 — since Cisco-style serials
+  // (e.g. PSJ153501UJ) are plain alphanumeric with no hyphen.
+  function classifyNonMac(s){ return /-/.test(s) ? "pid" : "serial"; }
+
+  // If OCR captured a label's printed text (not just the barcode payload), an explicit
+  // "S/N:" or "PID:"/"P/N:" prefix lets us route with certainty instead of guessing.
+  function extractLabeledOcrFields(raw){
+    const out = {};
+    const snMatch = raw.match(/S\s*\/?\s*N\.?\s*[:\-]?\s*([A-Za-z0-9\-]{5,})/i);
+    if (snMatch) out.serial = snMatch[1];
+    const pidMatch = raw.match(/P\s*\/?\s*ID\.?\s*[:\-]?\s*([A-Za-z0-9\-]{5,})/i) ||
+                      raw.match(/P\s*\/?\s*N\.?\s*[:\-]?\s*([A-Za-z0-9\-]{5,})/i);
+    if (pidMatch) out.pid = pidMatch[1];
+    return out;
+  }
+
+  // ---------- staging state (the device currently being assembled) ----------
+  const stage = {
+    serial: "", extraSerials: [],
+    pid: "", extraPids: [],
+    mac: "", extraMacs: [],
+    vendor: "", kind: "", location: "", note: ""
+  };
+
+  const serialInput = document.getElementById("serialInput");
+  const pidInput = document.getElementById("pidInput");
+  const macInput = document.getElementById("macInput");
+  const kindSelect = document.getElementById("kindSelect");
+  const locationInput = document.getElementById("locationInput");
+  const noteInput = document.getElementById("noteInput");
+  const vendorHint = document.getElementById("vendorHint");
+  const extraSerialChips = document.getElementById("extraSerialChips");
+  const extraPidChips = document.getElementById("extraPidChips");
+  const extraMacChips = document.getElementById("extraMacChips");
+
+  function renderChips(container, arr, onRemove){
+    container.innerHTML = arr.map((v,i) =>
+      `<span class="chip">${escapeHtml(v)}<button data-i="${i}">×</button></span>`
+    ).join("");
+    container.querySelectorAll("button").forEach(btn => {
+      btn.addEventListener("click", () => { onRemove(Number(btn.dataset.i)); });
+    });
+  }
+  function renderStageChips(){
+    renderChips(extraSerialChips, stage.extraSerials, i => { stage.extraSerials.splice(i,1); renderStageChips(); });
+    renderChips(extraPidChips, stage.extraPids, i => { stage.extraPids.splice(i,1); renderStageChips(); });
+    renderChips(extraMacChips, stage.extraMacs, i => { stage.extraMacs.splice(i,1); renderStageChips(); });
+  }
+
+  async function setVendorForStage(){
+    if (!stage.mac){ stage.vendor = ""; vendorHint.textContent = ""; return; }
+    const offline = macVendorOffline(stage.mac);
+    stage.vendor = offline || "";
+    vendorHint.textContent = offline ? `ベンダー: ${offline}（内蔵表）` : "ベンダー判定中…";
+    if (!stage.kind){
+      const guess = guessKindFromVendor(offline);
+      if (guess){ stage.kind = guess; kindSelect.value = guess; }
+    }
+    try {
+      const controller = new AbortController();
+      const t = setTimeout(() => controller.abort(), 3000);
+      const res = await fetch(`https://api.macvendors.com/${encodeURIComponent(stage.mac)}`, {signal: controller.signal});
+      clearTimeout(t);
+      if (res.ok){
+        const text = (await res.text()).trim();
+        if (text && !/error|not found/i.test(text)){
+          stage.vendor = text;
+          vendorHint.textContent = `ベンダー: ${text}（オンライン照会）`;
+          if (!kindSelect.value){
+            const guess2 = guessKindFromVendor(text);
+            if (guess2){ stage.kind = guess2; kindSelect.value = guess2; }
+          }
+        }
+      }
+    } catch (err) { /* offline / blocked, keep offline-table result */ }
+  }
+
+  let autoCommitTimer = null;
+  const AUTO_COMMIT_IDLE_MS = 2200;
+
+  function scheduleAutoCommit(){
+    if (autoCommitTimer) clearTimeout(autoCommitTimer);
+    autoCommitTimer = setTimeout(() => {
+      autoCommitTimer = null;
+      commitDevice("auto");
+    }, AUTO_COMMIT_IDLE_MS);
+  }
+
+  function routeScan(raw, forcedType){
+    const s = raw.trim();
+    if (!s) return;
+    const macCandidate = extractMacCandidate(s);
+    const type = forcedType || (macCandidate ? "mac" : classifyNonMac(s));
+
+    if (type === "mac"){
+      const val = macCandidate || s;
+      if (!stage.mac){
+        stage.mac = val; macInput.value = val;
+        setVendorForStage();
+      } else if (stage.mac.toLowerCase() !== val.toLowerCase() && !stage.extraMacs.includes(val)){
+        stage.extraMacs.push(val); renderStageChips();
+      }
+    } else if (type === "pid"){
+      if (!stage.pid){
+        stage.pid = s; pidInput.value = s;
+      } else if (stage.pid !== s && !stage.extraPids.includes(s)){
+        stage.extraPids.push(s); renderStageChips();
+      }
+    } else { // serial
+      if (!stage.serial){
+        stage.serial = s; serialInput.value = s;
+      } else if (stage.serial !== s && !stage.extraSerials.includes(s)){
+        stage.extraSerials.push(s); renderStageChips();
+      }
+    }
+
+    const typeLabel = type === "mac" ? "MAC" : type === "pid" ? "製造番号/型番" : "シリアル";
+    setStatus(`読み取り: ${s} → ${typeLabel}（このまま数秒待つと自動で台帳に追加されます）`);
+    scheduleAutoCommit();
+  }
+
+  // keep manual edits of the main fields in sync with stage
+  serialInput.addEventListener("input", () => { stage.serial = serialInput.value; });
+  pidInput.addEventListener("input", () => { stage.pid = pidInput.value; });
+  macInput.addEventListener("input", () => {
+    stage.mac = macInput.value;
+    if (isMac(stage.mac)) setVendorForStage(); else vendorHint.textContent = "";
+  });
+  kindSelect.addEventListener("change", () => { stage.kind = kindSelect.value; });
+  locationInput.addEventListener("input", () => { stage.location = locationInput.value; });
+  noteInput.addEventListener("input", () => { stage.note = noteInput.value; });
+
+  function clearStage(){
+    if (autoCommitTimer){ clearTimeout(autoCommitTimer); autoCommitTimer = null; }
+    stage.serial = ""; stage.extraSerials = [];
+    stage.pid = ""; stage.extraPids = [];
+    stage.mac = ""; stage.extraMacs = [];
+    stage.vendor = ""; stage.kind = ""; stage.location = ""; stage.note = "";
+    serialInput.value = ""; pidInput.value = ""; macInput.value = ""; kindSelect.value = "";
+    locationInput.value = ""; noteInput.value = "";
+    vendorHint.textContent = "";
+    renderStageChips();
+  }
+  document.getElementById("stageClearBtn").addEventListener("click", () => { clearStage(); setStatus("入力欄をクリアしました（自動追加も取り消しました）"); });
+
+  // ---------- device log (one row per device) ----------
+  let devices = [];
+  let seq = 1;
+  const logBody = document.getElementById("logBody");
+  const countBadge = document.getElementById("countBadge");
+
+  function escapeHtml(s){
+    return String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+  }
+
+  function renderLog(){
+    countBadge.textContent = `(${devices.length}件)`;
+    if (devices.length === 0){
+      logBody.innerHTML = '<tr class="empty-row"><td colspan="9">まだ機器が登録されていません</td></tr>';
+      return;
+    }
+    logBody.innerHTML = devices.slice().reverse().map(d => {
+      const serialText = [d.serial, ...d.extraSerials].filter(Boolean).join(" / ") || "—";
+      const pidText = [d.pid, ...d.extraPids].filter(Boolean).join(" / ") || "—";
+      const macText = [d.mac, ...d.extraMacs].filter(Boolean).join(" / ") || "—";
+      const vendorHtml = d.vendor ? `<span class="vendor">${escapeHtml(d.vendor)}</span>` : `<span class="vendor unknown">不明</span>`;
+      return `<tr data-id="${d.id}">
+        <td class="code-cell">${d.time}</td>
+        <td class="code-cell">${escapeHtml(serialText)}</td>
+        <td class="code-cell">${escapeHtml(pidText)}</td>
+        <td class="code-cell">${escapeHtml(macText)}</td>
+        <td>${vendorHtml}</td>
+        <td>${escapeHtml(d.kind || "—")}</td>
+        <td>${escapeHtml(d.location || "—")}</td>
+        <td><input class="note-input" data-id="${d.id}" placeholder="メモを入力" value="${escapeHtml(d.note||"")}"></td>
+        <td><button class="del-btn" data-id="${d.id}" title="削除">×</button></td>
+      </tr>`;
+    }).join("");
+  }
+
+  logBody.addEventListener("input", e => {
+    if (e.target.classList.contains("note-input")){
+      const id = Number(e.target.dataset.id);
+      const d = devices.find(x => x.id === id);
+      if (d) d.note = e.target.value;
+    }
+  });
+  logBody.addEventListener("click", e => {
+    if (e.target.classList.contains("del-btn")){
+      const id = Number(e.target.dataset.id);
+      devices = devices.filter(x => x.id !== id);
+      renderLog();
+    }
+  });
+
+  function commitDevice(source){
+    if (autoCommitTimer){ clearTimeout(autoCommitTimer); autoCommitTimer = null; }
+    if (!stage.serial && !stage.pid && !stage.mac){
+      setStatus("シリアル・製造番号・MACのいずれかを入力/スキャンしてください");
+      return false;
+    }
+    devices.push({
+      id: seq++,
+      time: new Date().toLocaleTimeString("ja-JP", {hour12:false}),
+      serial: stage.serial, extraSerials: [...stage.extraSerials],
+      pid: stage.pid, extraPids: [...stage.extraPids],
+      mac: stage.mac, extraMacs: [...stage.extraMacs],
+      vendor: stage.vendor, kind: stage.kind, location: stage.location, note: stage.note
+    });
+    renderLog();
+    clearStage();
+    setStatus(source === "auto" ? `自動で台帳に追加しました（${devices.length}件目）。次の機器をスキャンしてください` : "台帳に追加しました。次の機器をスキャンしてください");
+    return true;
+  }
+
+  document.getElementById("commitBtn").addEventListener("click", () => commitDevice("manual"));
+
+  document.getElementById("clearBtn").addEventListener("click", () => {
+    if (devices.length === 0) return;
+    if (confirm("台帳をすべて消去します。よろしいですか？")){
+      devices = []; renderLog(); setStatus("台帳を消去しました");
+    }
+  });
+
+  // ---------- camera scanning ----------
+  // iOS Safari needs: (a) a secure context (https or localhost — file:// will not work),
+  // (b) explicit camera selection by deviceId rather than relying on facingMode alone.
+  let html5QrCode = null;
+  let scanning = false;
+  let cameras = [];
+  let cameraIndex = 0;
+  let manualCameraSelect = false; // true once the user explicitly hits "カメラ切替"
+  const scanArea = document.getElementById("scanArea");
+  const startBtn = document.getElementById("startBtn");
+  const stopBtn = document.getElementById("stopBtn");
+  const switchBtn = document.getElementById("switchBtn");
+  const statusLine = document.getElementById("statusLine");
+  const recentCodes = new Map();
+
+  function setStatus(msg){ statusLine.textContent = msg; }
+
+  function buildViewfinder(){
+    scanArea.classList.remove("inactive");
+    scanArea.innerHTML = `<div id="reader"></div>
+      <div class="brackets"><span class="tl"></span><span class="tr"></span><span class="bl"></span><span class="br"></span></div>
+      <div class="scanline"></div>`;
+  }
+  function resetViewfinder(msg){
+    scanArea.classList.add("inactive");
+    scanArea.innerHTML = `<div class="placeholder">${msg}</div>`;
+  }
+
+  let scanAttempts = 0;
+  let scanSuccesses = 0;
+  const scanDebug = document.getElementById("scanDebug");
+
+  function onDecoded(text){
+    scanSuccesses++;
+    const now = Date.now();
+    const last = recentCodes.get(text);
+    if (last && (now - last) < 3000) return; // debounce identical rapid scans
+    recentCodes.set(text, now);
+    routeScan(text);
+  }
+
+  function onDecodeAttempt(){
+    // Called on every frame that failed to decode. If this number never increases,
+    // the decode loop itself isn't running (camera issue). If it climbs steadily
+    // but scanSuccesses stays 0, frames are being processed but nothing is decoding
+    // (image quality / distance / angle / unsupported format).
+    scanAttempts++;
+    if (scanDebug && scanAttempts % 8 === 0){
+      scanDebug.textContent = `解析中… (フレーム処理: ${scanAttempts}回 / 検出: ${scanSuccesses}回)`;
+    }
+  }
+
+  function pickDefaultCameraIndex(list){
+    // iPhones (and some Android phones) list each physical lens as a separate camera
+    // device. The plain wide "Back Camera" has the best close-focus range for scanning
+    // labels — ultra-wide and telephoto lenses tend to focus poorly at 10-20cm.
+    const isBackish = c => /back|rear|environment|背面/i.test(c.label || "");
+    const isFrontish = c => /front|face|user|前面|自分/i.test(c.label || "");
+    const isSideLens = c => /ultra ?wide|wide angle|telephoto|zoom/i.test(c.label || "");
+
+    let idx = list.findIndex(c => isBackish(c) && !isSideLens(c));
+    if (idx >= 0) return idx;
+    idx = list.findIndex(isBackish);
+    if (idx >= 0) return idx;
+    // No device is explicitly labeled as the back camera — rather than guessing
+    // "last in the list" (which can land on the front/selfie camera on some
+    // devices), just avoid anything explicitly labeled as front-facing.
+    idx = list.findIndex(c => !isFrontish(c));
+    if (idx >= 0) return idx;
+    return list.length - 1;
+  }
+
+  async function startCameraAt(index){
+    buildViewfinder();
+    // Kept deliberately simple: no formatsToSupport restriction (defaults already
+    // include 1D barcodes + QR) and a plain fixed qrbox instead of a callback —
+    // fewer moving parts to silently break the decode loop.
+    html5QrCode = new Html5Qrcode("reader");
+
+    const config = {
+      fps: 10,
+      qrbox: { width: 260, height: 140 },
+      videoConstraints: { width: { ideal: 1920 }, height: { ideal: 1080 } }
+    };
+
+    // On iOS Safari, selecting a camera by deviceId is unreliable — it can silently
+    // land on the front camera or fail to switch. facingMode:{exact:"environment"}
+    // is the standard, reliable way to get the back camera there. We only target a
+    // specific deviceId when the user explicitly picked a lens via "カメラ切替".
+    const useDeviceId = manualCameraSelect && cameras.length > 0;
+    const attempts = useDeviceId
+      ? [cameras[index].id, { facingMode: { exact: "environment" } }, { facingMode: "environment" }]
+      : [{ facingMode: { exact: "environment" } }, { facingMode: "environment" }, cameras.length ? cameras[index].id : null];
+
+    let lastErr = null;
+    for (const target of attempts){
+      if (!target) continue;
+      try {
+        scanAttempts = 0; scanSuccesses = 0;
+        await html5QrCode.start(target, config, onDecoded, onDecodeAttempt);
+        applyCameraEnhancements();
+        return;
+      } catch (err) {
+        lastErr = err;
+        try { await html5QrCode.stop(); } catch (e) {}
+      }
+    }
+    throw lastErr || new Error("カメラを起動できませんでした");
+  }
+
+  // ---- focus / zoom / torch: uses html5-qrcode's camera-capability API where the
+  // browser exposes it (mostly Android Chrome). iOS Safari exposes no focus API at
+  // all, so refocusCamera() falls back to restarting the stream — the only lever
+  // available there — which makes the OS re-run its own autofocus search.
+  const cameraEnhancements = document.getElementById("cameraEnhancements");
+  let refocusBusy = false;
+
+  async function refocusCamera(){
+    if (!scanning || refocusBusy) return;
+    refocusBusy = true;
+    setStatus("ピントを合わせ直しています…");
+    try {
+      if (html5QrCode && typeof html5QrCode.getRunningTrackCameraCapabilities === "function"){
+        try {
+          const capabilities = html5QrCode.getRunningTrackCameraCapabilities();
+          const focus = capabilities && capabilities.focusModeFeature && capabilities.focusModeFeature();
+          if (focus && focus.isSupported()){
+            await focus.apply("continuous");
+            setStatus("ピントを合わせ直しました");
+            refocusBusy = false;
+            return;
+          }
+        } catch (e) { /* fall through to restart */ }
+      }
+      await html5QrCode.stop(); html5QrCode.clear();
+      await startCameraAt(cameraIndex);
+      setStatus("カメラを再起動してピントを合わせ直しました");
+    } catch (err) {
+      setStatus("ピントの再調整に失敗しました: " + (err && err.message ? err.message : err));
+    }
+    refocusBusy = false;
+  }
+  // Tap the preview to refocus — mirrors the tap-to-focus gesture people already
+  // know from the native camera app, even though on iPhone it's really a restart.
+  scanArea.addEventListener("click", () => { if (scanning) refocusCamera(); });
+
+  function clearCameraEnhancements(){
+    cameraEnhancements.style.display = "none";
+    cameraEnhancements.innerHTML = "";
+  }
+
+  function applyCameraEnhancements(){
+    clearCameraEnhancements();
+    if (!html5QrCode || typeof html5QrCode.getRunningTrackCameraCapabilities !== "function"){
+      cameraEnhancements.innerHTML = `<div class="cam-enhance-note">画面をタップするとカメラを再起動してピントを合わせ直せます。バーコードから10〜15cm離し、まっすぐ向けるのも効果的です。</div>`;
+      cameraEnhancements.style.display = "block";
+      return;
+    }
+    let capabilities;
+    try { capabilities = html5QrCode.getRunningTrackCameraCapabilities(); }
+    catch (e) { capabilities = null; }
+
+    let anySupported = false;
+    const rows = [`<div class="cam-enhance-row"><button class="small" id="refocusBtn">📷 ピントを合わせ直す（画面タップでも可）</button></div>`];
+
+    if (capabilities){
+      try {
+        const focus = capabilities.focusModeFeature();
+        if (focus && focus.isSupported()){
+          anySupported = true;
+          focus.apply("continuous").catch(() => {});
+        }
+      } catch (e) {}
+
+      try {
+        const zoom = capabilities.zoomFeature();
+        if (zoom && zoom.isSupported()){
+          anySupported = true;
+          const min = zoom.min(), max = zoom.max(), step = zoom.step() || 0.1;
+          rows.push(`<div class="cam-enhance-row">
+            <span>🔎 ズーム</span>
+            <input type="range" id="zoomRange" min="${min}" max="${max}" step="${step}" value="${zoom.value() || min}">
+          </div>`);
+        }
+      } catch (e) {}
+
+      try {
+        const torch = capabilities.torchFeature();
+        if (torch && torch.isSupported()){
+          anySupported = true;
+          rows.push(`<div class="cam-enhance-row">
+            <span>🔦 ライト</span>
+            <button class="small" id="torchBtn">オン/オフ</button>
+          </div>`);
+        }
+      } catch (e) {}
+    }
+
+    if (!anySupported){
+      rows.push(`<div class="cam-enhance-note">この端末/ブラウザはピント・ズームの自動制御に対応していません（iPhoneのSafariでは仕様上できません）。ボタンや画面タップでカメラを再起動し、OS側のオートフォーカスをやり直せます。バーコードから10〜15cm離し、まっすぐ向けるのも効果的です。</div>`);
+    }
+
+    cameraEnhancements.innerHTML = rows.join("");
+    cameraEnhancements.style.display = "block";
+
+    document.getElementById("refocusBtn").addEventListener("click", refocusCamera);
+    const zoomRange = document.getElementById("zoomRange");
+    if (zoomRange){
+      zoomRange.addEventListener("input", async () => {
+        try {
+          const zoom = capabilities.zoomFeature();
+          await zoom.apply(Number(zoomRange.value));
+        } catch (e) { /* ignore */ }
+      });
+    }
+    const torchBtn = document.getElementById("torchBtn");
+    if (torchBtn){
+      let torchOn = false;
+      torchBtn.addEventListener("click", async () => {
+        try {
+          const torch = capabilities.torchFeature();
+          torchOn = !torchOn;
+          await torch.apply(torchOn);
+        } catch (e) { setStatus("この端末ではライトの制御に対応していません"); }
+      });
+    }
+  }
+
+  startBtn.addEventListener("click", async () => {
+    if (typeof Html5Qrcode === "undefined"){
+      setStatus("スキャナ用ライブラリを読み込めませんでした。手動入力をお使いください。");
+      return;
+    }
+    if (!window.isSecureContext){
+      setStatus("この画面はHTTPS（またはlocalhost）で開かれていないため、カメラを起動できません。手動入力をお使いください。");
+      return;
+    }
+    startBtn.disabled = true;
+    setStatus("カメラを起動しています…");
+    try {
+      try { cameras = await Html5Qrcode.getCameras(); } catch(e){ cameras = []; }
+      cameraIndex = cameras.length ? pickDefaultCameraIndex(cameras) : 0;
+      manualCameraSelect = false; // fresh start: prefer facingMode:environment over deviceId
+      await startCameraAt(cameraIndex);
+      scanning = true;
+      stopBtn.disabled = false;
+      switchBtn.disabled = cameras.length < 2;
+      setStatus("スキャン中… コードをフレーム内に収めてください");
+    } catch (err) {
+      startBtn.disabled = false;
+      resetViewfinder("カメラを起動できませんでした<br>権限を確認するか、手動入力をお使いください");
+      setStatus("カメラエラー: " + (err && err.message ? err.message : err) + "。iPhoneの場合はSafariでHTTPS経由で開いているか確認してください。");
+    }
+  });
+
+  switchBtn.addEventListener("click", async () => {
+    if (!scanning || cameras.length < 2) return;
+    switchBtn.disabled = true;
+    setStatus("カメラを切り替えています…");
+    manualCameraSelect = true; // user is explicitly picking a lens now — use its deviceId
+    try {
+      await html5QrCode.stop(); html5QrCode.clear();
+      cameraIndex = (cameraIndex + 1) % cameras.length;
+      await startCameraAt(cameraIndex);
+      setStatus(`カメラ切替: ${cameras[cameraIndex].label || "カメラ " + (cameraIndex+1)}`);
+    } catch (err) {
+      setStatus("カメラの切替に失敗しました: " + (err && err.message ? err.message : err));
+    }
+    switchBtn.disabled = cameras.length < 2;
+  });
+
+  stopBtn.addEventListener("click", async () => {
+    if (html5QrCode && scanning){
+      try { await html5QrCode.stop(); html5QrCode.clear(); } catch(e){}
+    }
+    scanning = false;
+    startBtn.disabled = false;
+    stopBtn.disabled = true;
+    switchBtn.disabled = true;
+    clearCameraEnhancements();
+    const autoOcrToggleEl = document.getElementById("autoOcrToggle");
+    if (autoOcrToggleEl) autoOcrToggleEl.checked = false;
+    resetViewfinder("「カメラを開始」を押してください<br>読み取るたびに右の入力欄が自動で埋まります");
+    if (scanDebug) scanDebug.textContent = "";
+    setStatus("停止しました");
+  });
+
+  document.getElementById("manualAddBtn").addEventListener("click", () => {
+    const input = document.getElementById("manualInput");
+    const val = input.value.trim();
+    if (!val) return;
+    routeScan(val);
+    input.value = "";
+  });
+  document.getElementById("manualInput").addEventListener("keydown", e => {
+    if (e.key === "Enter") document.getElementById("manualAddBtn").click();
+  });
+
+  // ---------- OCR fallback (Tesseract.js) for when the barcode itself won't scan ----------
+  const ocrFileInput = document.getElementById("ocrFileInput");
+  const ocrTriggerBtn = document.getElementById("ocrTriggerBtn");
+  const ocrStatus = document.getElementById("ocrStatus");
+  const ocrResultBox = document.getElementById("ocrResultBox");
+  const ocrText = document.getElementById("ocrText");
+  const ocrCandidates = document.getElementById("ocrCandidates");
+  const autoOcrToggle = document.getElementById("autoOcrToggle");
+  const ocrCanvas = document.getElementById("ocrCanvas");
+
+  ocrTriggerBtn.addEventListener("click", () => ocrFileInput.click());
+
+  ocrFileInput.addEventListener("change", async () => {
+    const file = ocrFileInput.files && ocrFileInput.files[0];
+    if (!file) return;
+    if (typeof Tesseract === "undefined"){
+      ocrStatus.textContent = "文字認識ライブラリを読み込めませんでした。通信環境を確認してください。";
+      return;
+    }
+    ocrResultBox.style.display = "none";
+    ocrStatus.textContent = "文字認識の準備中…";
+    try {
+      const result = await Tesseract.recognize(file, "eng", {
+        logger: m => {
+          if (m.status === "recognizing text"){
+            ocrStatus.textContent = `文字認識中… ${Math.round((m.progress||0)*100)}%`;
+          } else if (m.status) {
+            ocrStatus.textContent = m.status;
+          }
+        }
+      });
+      const raw = (result.data && result.data.text || "").trim();
+      ocrText.value = raw.replace(/\s+/g, " ");
+      renderOcrCandidates(raw);
+      applyLabeledOcrFields(raw);
+      ocrResultBox.style.display = "block";
+      ocrStatus.textContent = raw ? "認識できました。結果を確認・編集してください" : "文字を認識できませんでした。写真を撮り直してみてください";
+    } catch (err) {
+      ocrStatus.textContent = "文字認識に失敗しました: " + (err && err.message ? err.message : err);
+    } finally {
+      ocrFileInput.value = "";
+    }
+  });
+
+  function applyLabeledOcrFields(raw){
+    const labeled = extractLabeledOcrFields(raw);
+    if (labeled.serial) routeScan(labeled.serial, "serial");
+    if (labeled.pid) routeScan(labeled.pid, "pid");
+  }
+
+  function renderOcrCandidates(raw){
+    const tokens = new Set();
+    const macMatches = raw.match(/([0-9A-Fa-f]{2}[:\-]){5}[0-9A-Fa-f]{2}/g) || [];
+    macMatches.forEach(m => tokens.add(m));
+    const alnumMatches = raw.match(/[A-Za-z0-9][A-Za-z0-9\-]{4,}/g) || [];
+    alnumMatches.forEach(m => { if (!/^-+$/.test(m)) tokens.add(m); });
+    ocrCandidates.innerHTML = "";
+    tokens.forEach(tok => {
+      const chip = document.createElement("span");
+      chip.className = "chip";
+      chip.style.cursor = "pointer";
+      chip.textContent = tok;
+      chip.title = "クリックでスキャン欄に反映";
+      chip.addEventListener("click", () => { routeScan(tok); ocrStatus.textContent = `「${tok}」を反映しました`; });
+      ocrCandidates.appendChild(chip);
+    });
+  }
+
+  document.getElementById("ocrUseAsSerialBtn").addEventListener("click", () => {
+    const v = ocrText.value.trim();
+    if (!v) return;
+    routeScan(v, "serial");
+    ocrStatus.textContent = "シリアル欄に反映しました";
+  });
+  document.getElementById("ocrUseAsPidBtn").addEventListener("click", () => {
+    const v = ocrText.value.trim();
+    if (!v) return;
+    routeScan(v, "pid");
+    ocrStatus.textContent = "製造番号欄に反映しました";
+  });
+  document.getElementById("ocrUseAsNoteBtn").addEventListener("click", () => {
+    const v = ocrText.value.trim();
+    if (!v) return;
+    stage.note = stage.note ? stage.note + " / " + v : v;
+    noteInput.value = stage.note;
+    ocrStatus.textContent = "メモに反映しました";
+  });
+
+  // ---- continuous background OCR: samples the live camera feed every few seconds ----
+  // instead of requiring a manual photo each time, so scanning stays a hands-free flow.
+  let ocrLoopIntervalId = null;
+  let ocrLoopBusy = false;
+  const ocrRecentTokens = new Map();
+
+  function startAutoOcrLoopIfNeeded(){
+    if (ocrLoopIntervalId) return;
+    ocrLoopIntervalId = setInterval(runAutoOcrPass, 2500);
+  }
+
+  function handleAutoOcrTokens(raw){
+    const now = Date.now();
+    const isRecent = tok => {
+      const last = ocrRecentTokens.get(tok.toLowerCase());
+      return last && (now - last) < 4000;
+    };
+    applyLabeledOcrFields(raw);
+    const macMatches = raw.match(/([0-9A-Fa-f]{2}[:\-]){5}[0-9A-Fa-f]{2}/g) || [];
+    macMatches.forEach(m => {
+      if (isRecent(m)) return;
+      ocrRecentTokens.set(m.toLowerCase(), now);
+      routeScan(m);
+    });
+    // generic alphanumeric tokens (likely serials/model numbers) are noisier from OCR,
+    // so only auto-route when a single clear candidate appears in this pass
+    const alnum = Array.from(new Set(raw.match(/[A-Za-z0-9][A-Za-z0-9\-]{5,}/g) || []));
+    if (alnum.length === 1 && !isRecent(alnum[0])){
+      ocrRecentTokens.set(alnum[0].toLowerCase(), now);
+      routeScan(alnum[0]);
+    }
+  }
+
+  async function runAutoOcrPass(){
+    if (!autoOcrToggle.checked || !scanning || ocrLoopBusy) return;
+    if (typeof Tesseract === "undefined") return;
+    const video = document.querySelector("#reader video");
+    if (!video || video.readyState < 2 || !video.videoWidth) return;
+    ocrLoopBusy = true;
+    try {
+      ocrCanvas.width = video.videoWidth;
+      ocrCanvas.height = video.videoHeight;
+      ocrCanvas.getContext("2d").drawImage(video, 0, 0, ocrCanvas.width, ocrCanvas.height);
+      const result = await Tesseract.recognize(ocrCanvas, "eng");
+      const raw = (result.data && result.data.text || "").trim();
+      if (raw){
+        ocrText.value = raw.replace(/\s+/g, " ");
+        renderOcrCandidates(raw);
+        ocrResultBox.style.display = "block";
+        handleAutoOcrTokens(raw);
+      }
+    } catch (err) {
+      // transient frame/recognition errors are expected during continuous sampling — ignore
+    }
+    ocrLoopBusy = false;
+  }
+
+  autoOcrToggle.addEventListener("change", () => {
+    if (autoOcrToggle.checked){
+      if (!scanning){
+        ocrStatus.textContent = "先に「カメラを開始」を押してください";
+        autoOcrToggle.checked = false;
+        return;
+      }
+      startAutoOcrLoopIfNeeded();
+      ocrStatus.textContent = "カメラ映像から数秒おきに自動で文字認識します";
+    } else {
+      ocrStatus.textContent = "自動文字認識を停止しました";
+    }
+  });
+
+  // ---------- export ----------
+  function download(filename, content, mime){
+    const blob = new Blob([content], {type: mime});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = filename;
+    document.body.appendChild(a); a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }
+  function csvEscape(s){
+    s = String(s ?? "");
+    if (/[",\n]/.test(s)) return '"' + s.replace(/"/g,'""') + '"';
+    return s;
+  }
+
+  document.getElementById("exportCsvBtn").addEventListener("click", () => {
+    if (devices.length === 0){ setStatus("出力する機器がありません"); return; }
+    const header = ["追加時刻","シリアル(S/N)","追加シリアル","製造番号/型番","追加型番","MAC","追加MAC","ベンダー","種別","設置場所","メモ"];
+    const rows = devices.map(d => [
+      d.time, d.serial, d.extraSerials.join(";"), d.pid, d.extraPids.join(";"), d.mac, d.extraMacs.join(";"), d.vendor, d.kind, d.location, d.note
+    ]);
+    const csv = [header, ...rows].map(r => r.map(csvEscape).join(",")).join("\n");
+    download(`network_assets_${Date.now()}.csv`, "\ufeff" + csv, "text/csv;charset=utf-8;");
+    setStatus("CSVを出力しました");
+  });
+
+  document.getElementById("exportJsonBtn").addEventListener("click", () => {
+    if (devices.length === 0){ setStatus("出力する機器がありません"); return; }
+    download(`network_assets_${Date.now()}.json`, JSON.stringify(devices, null, 2), "application/json;charset=utf-8;");
+    setStatus("JSONを出力しました");
+  });
+
+  renderLog();
+  renderStageChips();
+})();
+</script>
+</body>
+</html>
