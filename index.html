@@ -72,7 +72,9 @@
     <h2>① 撮影して読み取る（iPhone推奨）</h2>
     <button class="primary" id="photoBtn">📷 バーコードを撮影して読み取る</button>
     <input type="file" accept="image/*" capture="environment" id="photoInput" style="display:none;">
-    <div class="hint">標準カメラが開きます。バーコードが画面いっぱいになるよう近づけ、ピントが合ってから撮影してください。撮った写真から自動でコードを解析します。</div>
+    <button class="block" id="libBtn" style="margin-top:10px;">🖼 保存済みの写真から選ぶ（カメラ権限不要）</button>
+    <input type="file" accept="image/*" id="libInput" style="display:none;">
+    <div class="hint">「撮影して読み取る」は標準カメラが開きます。バーコードが画面いっぱいになるよう近づけ、ピントが合ってから撮影してください。<br>カメラ権限で起動しない場合は、先に普通のカメラアプリで撮っておき「保存済みの写真から選ぶ」を使えば、権限に関係なく読み取れます。</div>
     <div class="status" id="photoStatus"></div>
   </div>
 
@@ -183,6 +185,8 @@
   // ---------- photo capture (still-image decode) ----------
   var photoBtn = document.getElementById("photoBtn");
   var photoInput = document.getElementById("photoInput");
+  var libBtn = document.getElementById("libBtn");
+  var libInput = document.getElementById("libInput");
   var photoStatus = document.getElementById("photoStatus");
   var fileReader = null;
 
@@ -196,19 +200,22 @@
   }
   function setStatus(el, msg, cls){ el.className = "status" + (cls ? (" "+cls) : ""); el.textContent = msg; }
 
-  photoBtn.addEventListener("click", function(){ photoInput.click(); });
-  photoInput.addEventListener("change", function(){
-    var file = photoInput.files && photoInput.files[0];
+  function decodeFile(file, inputEl, via){
     if (!file) return;
     if (typeof Html5Qrcode === "undefined"){ setStatus(photoStatus, "ライブラリを読み込めませんでした。通信環境を確認してください。", "err"); return; }
     setStatus(photoStatus, "解析中…", "");
     getFileReader().scanFile(file, false).then(function(text){
-      var added = addResult(text, "", "撮影");
+      var added = addResult(text, "", via);
       setStatus(photoStatus, added ? ("読み取り成功: " + text) : ("すでに読み取り済み: " + text), "ok");
     }).catch(function(){
-      setStatus(photoStatus, "バーコードを検出できませんでした。もっと近づけて、ピントを合わせ、明るい場所で撮り直してください。", "err");
-    }).then(function(){ photoInput.value = ""; });
-  });
+      setStatus(photoStatus, "この画像からバーコードを検出できませんでした。もっと近づけて、ピントを合わせ、明るい場所で撮り直してください。", "err");
+    }).then(function(){ if (inputEl) inputEl.value = ""; });
+  }
+
+  photoBtn.addEventListener("click", function(){ photoInput.click(); });
+  photoInput.addEventListener("change", function(){ decodeFile(photoInput.files && photoInput.files[0], photoInput, "撮影"); });
+  libBtn.addEventListener("click", function(){ libInput.click(); });
+  libInput.addEventListener("change", function(){ decodeFile(libInput.files && libInput.files[0], libInput, "写真"); });
 
   // ---------- live scanning ----------
   var scanArea = document.getElementById("scanArea");
