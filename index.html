@@ -635,9 +635,29 @@
 
     const config = {
       fps: 10,
-      qrbox: { width: 260, height: 140 },
-      videoConstraints: { width: { ideal: 1920 }, height: { ideal: 1080 } }
+      qrbox: { width: 300, height: 160 }, // 1Dバーコード向けに横長・少し広めに
+      videoConstraints: { width: { ideal: 1920 }, height: { ideal: 1080 } },
+      // Androidなど対応端末ではネイティブの高速バーコード検出を使う。
+      // iOS Safariは非対応なので自動的にJS側デコーダ(ZXing)にフォールバックする。
+      experimentalFeatures: { useBarCodeDetectorIfSupported: true }
     };
+    // 読み取り対象を業務でよく使う形式に絞ると、1フレームあたりの総当たりが減り
+    // 狙ったバーコードの検出率・速度が上がる（フッター記載の対応形式に合わせる）。
+    if (typeof Html5QrcodeSupportedFormats !== "undefined"){
+      config.formatsToSupport = [
+        Html5QrcodeSupportedFormats.CODE_128,
+        Html5QrcodeSupportedFormats.CODE_39,
+        Html5QrcodeSupportedFormats.CODE_93,
+        Html5QrcodeSupportedFormats.EAN_13,
+        Html5QrcodeSupportedFormats.EAN_8,
+        Html5QrcodeSupportedFormats.UPC_A,
+        Html5QrcodeSupportedFormats.UPC_E,
+        Html5QrcodeSupportedFormats.ITF,
+        Html5QrcodeSupportedFormats.CODABAR,
+        Html5QrcodeSupportedFormats.QR_CODE,
+        Html5QrcodeSupportedFormats.DATA_MATRIX
+      ];
+    }
 
     // On iOS Safari, selecting a camera by deviceId is unreliable — it can silently
     // land on the front camera or fail to switch. facingMode:{exact:"environment"}
@@ -899,6 +919,75 @@
   const autoOcrToggle = document.getElementById("autoOcrToggle");
   const ocrCanvas = document.getElementById("ocrCanvas");
 
+  // Shared Tesseract worker tuned for short alphanumeric equipment labels.
+  // Default Tesseract settings assume full-page prose, which garbles short
+  // serial/model strings. Restricting the character set to alphanumerics + the
+  // few symbols used in serials/PIDs/MACs, and using single-block segmentation,
+  // is what turns "文字化け" into a readable string.
+  const OCR_WHITELIST = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-:./ ";
+  let ocrWorker = null, ocrWorkerPromise = null, ocrLoggerActive = false;
+
+  async function getOcrWorker(){
+    if (ocrWorker) return ocrWorker;
+    if (ocrWorkerPromise) return ocrWorkerPromise;
+    ocrWorkerPromise = (async () => {
+      const worker = await Tesseract.createWorker("eng", 1, {
+        logger: m => {
+          if (ocrLoggerActive && m.status === "recognizing text"){
+            ocrStatus.textContent = `文字認識中… ${Math.round((m.progress||0)*100)}%`;
+          }
+        }
+      });
+      await worker.setParameters({
+        tessedit_char_whitelist: OCR_WHITELIST,
+        tessedit_pageseg_mode: (Tesseract.PSM && Tesseract.PSM.SINGLE_BLOCK) || "6",
+        preserve_interword_spaces: "1"
+      });
+      ocrWorker = worker;
+      return worker;
+    })();
+    return ocrWorkerPromise;
+  }
+
+  // Grayscale + linear contrast stretch + resize; crop args select a region of
+  // the source (video frame or photo). Good contrast at ~1000-1600px wide is what
+  // Tesseract reads best — raw multi-megapixel color frames read poorly.
+  function preprocessForOcr(source, sx, sy, sw, sh, targetW){
+    const ratio = targetW / sw;
+    const cw = Math.max(1, Math.round(sw * ratio));
+    const ch = Math.max(1, Math.round(sh * ratio));
+    const c = document.createElement("canvas");
+    c.width = cw; c.height = ch;
+    const ctx = c.getContext("2d", { willReadFrequently: true });
+    ctx.drawImage(source, sx, sy, sw, sh, 0, 0, cw, ch);
+    const imgData = ctx.getImageData(0, 0, cw, ch);
+    const d = imgData.data;
+    let mn = 255, mx = 0;
+    for (let i = 0; i < d.length; i += 4){
+      const g = (0.299*d[i] + 0.587*d[i+1] + 0.114*d[i+2]) | 0;
+      d[i] = d[i+1] = d[i+2] = g;
+      if (g < mn) mn = g;
+      if (g > mx) mx = g;
+    }
+    const range = Math.max(1, mx - mn);
+    for (let i = 0; i < d.length; i += 4){
+      const v = ((d[i] - mn) * 255 / range) | 0;
+      d[i] = d[i+1] = d[i+2] = v;
+    }
+    ctx.putImageData(imgData, 0, 0);
+    return c;
+  }
+
+  function loadImageFromFile(file){
+    return new Promise((resolve, reject) => {
+      const url = URL.createObjectURL(file);
+      const img = new Image();
+      img.onload = () => resolve({ img, url });
+      img.onerror = e => { URL.revokeObjectURL(url); reject(e); };
+      img.src = url;
+    });
+  }
+
   ocrTriggerBtn.addEventListener("click", () => ocrFileInput.click());
 
   ocrFileInput.addEventListener("change", async () => {
@@ -910,16 +999,18 @@
     }
     ocrResultBox.style.display = "none";
     ocrStatus.textContent = "文字認識の準備中…";
+    ocrLoggerActive = true;
     try {
-      const result = await Tesseract.recognize(file, "eng", {
-        logger: m => {
-          if (m.status === "recognizing text"){
-            ocrStatus.textContent = `文字認識中… ${Math.round((m.progress||0)*100)}%`;
-          } else if (m.status) {
-            ocrStatus.textContent = m.status;
-          }
-        }
-      });
+      const worker = await getOcrWorker();
+      // Downscale huge photos and normalize contrast before recognition.
+      let ocrImage = file;
+      try {
+        const { img, url } = await loadImageFromFile(file);
+        const targetW = Math.min(img.naturalWidth || 1600, 1600);
+        ocrImage = preprocessForOcr(img, 0, 0, img.naturalWidth, img.naturalHeight, targetW);
+        URL.revokeObjectURL(url);
+      } catch (e) { /* fall back to the raw file if preprocessing fails */ }
+      const result = await worker.recognize(ocrImage);
       const raw = (result.data && result.data.text || "").trim();
       ocrText.value = raw.replace(/\s+/g, " ");
       renderOcrCandidates(raw);
@@ -929,6 +1020,7 @@
     } catch (err) {
       ocrStatus.textContent = "文字認識に失敗しました: " + (err && err.message ? err.message : err);
     } finally {
+      ocrLoggerActive = false;
       ocrFileInput.value = "";
     }
   });
@@ -1017,10 +1109,14 @@
     if (!video || video.readyState < 2 || !video.videoWidth) return;
     ocrLoopBusy = true;
     try {
-      ocrCanvas.width = video.videoWidth;
-      ocrCanvas.height = video.videoHeight;
-      ocrCanvas.getContext("2d").drawImage(video, 0, 0, ocrCanvas.width, ocrCanvas.height);
-      const result = await Tesseract.recognize(ocrCanvas, "eng");
+      const worker = await getOcrWorker();
+      // Sample only the central band of the frame (where the label is held) and
+      // normalize it — feeding the whole noisy frame is a major source of garbled OCR.
+      const vw = video.videoWidth, vh = video.videoHeight;
+      const sx = Math.round(vw * 0.10), sw = Math.round(vw * 0.80);
+      const sy = Math.round(vh * 0.30), sh = Math.round(vh * 0.40);
+      const pre = preprocessForOcr(video, sx, sy, sw, sh, Math.min(sw, 1000));
+      const result = await worker.recognize(pre);
       const raw = (result.data && result.data.text || "").trim();
       if (raw){
         ocrText.value = raw.replace(/\s+/g, " ");
