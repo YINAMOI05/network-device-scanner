@@ -648,17 +648,54 @@
       ? [cameras[index].id, { facingMode: { exact: "environment" } }, { facingMode: "environment" }]
       : [{ facingMode: { exact: "environment" } }, { facingMode: "environment" }, cameras.length ? cameras[index].id : null];
 
+    function isFrontFacing(){
+      try {
+        const settings = typeof html5QrCode.getRunningTrackSettings === "function"
+          ? html5QrCode.getRunningTrackSettings() : null;
+        return !!(settings && settings.facingMode === "user");
+      } catch (e) { return false; }
+    }
+
     let lastErr = null;
     for (const target of attempts){
       if (!target) continue;
       try {
         scanAttempts = 0; scanSuccesses = 0;
         await html5QrCode.start(target, config, onDecoded, onDecodeAttempt);
+        // Some browsers (especially in-app WebViews like LINE/Twitter/Instagram's
+        // built-in browser) ignore facingMode constraints entirely. Check what we
+        // actually got, and keep trying if it's the front/selfie camera.
+        if (isFrontFacing()){
+          lastErr = new Error("front-camera-selected");
+          try { await html5QrCode.stop(); } catch (e) {}
+          continue;
+        }
         applyCameraEnhancements();
         return;
       } catch (err) {
         lastErr = err;
         try { await html5QrCode.stop(); } catch (e) {}
+      }
+    }
+
+    // Last resort: none of the constraint-based attempts landed on a back camera.
+    // Cycle through every enumerated camera by deviceId and use the first one that
+    // actually reports as non-front when active.
+    if (cameras.length > 1){
+      for (let i = 0; i < cameras.length; i++){
+        try {
+          scanAttempts = 0; scanSuccesses = 0;
+          await html5QrCode.start(cameras[i].id, config, onDecoded, onDecodeAttempt);
+          if (!isFrontFacing()){
+            cameraIndex = i;
+            applyCameraEnhancements();
+            return;
+          }
+          try { await html5QrCode.stop(); } catch (e) {}
+        } catch (err) {
+          lastErr = err;
+          try { await html5QrCode.stop(); } catch (e) {}
+        }
       }
     }
     throw lastErr || new Error("カメラを起動できませんでした");
